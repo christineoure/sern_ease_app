@@ -11,7 +11,7 @@ CHROMA_PATH = os.path.join(ABS_PATH, 'chroma_db_serene_ease')
 
 # This must match your backend files exactly
 COLLECTION_NAME = f"mental_health_chunks_{MODEL_NAME.split('-')[0]}"
-N_RESULTS = 3 
+N_RESULTS = 2 
 GEMINI_MODEL = "gemini-2.0-flash" # Use 2.0-flash for stability
 
 # --- 2. Backend Initialization ---
@@ -64,46 +64,43 @@ def get_rag_components():
 # --- 3. RAG Logic (Synced with rag_system.py) ---
 
 def run_rag_query(user_query, collection, gemini_client):
-    """Retrieves context and generates response."""
-    
-    # RETRIEVAL (R)
-    results = collection.query(
-        query_texts=[user_query],
-        n_results=N_RESULTS,
-        include=['documents', 'metadatas']
-    )
-    
-    context_snippets = []
-    sources = set()
-
-    for i in range(len(results['documents'][0])):
-        doc = results['documents'][0][i]
-        meta = results['metadatas'][0][i]
-        src = meta.get('source', 'Unknown')
-        url = meta.get('url', '#')
+    """Performs the full RAG process with error handling for rate limits."""
+    try:
+        # 1. RETRIEVAL
+        results = collection.query(
+            query_texts=[user_query],
+            n_results=3,
+            include=['documents', 'metadatas']
+        )
         
-        context_snippets.append(f"Source {i+1} ({src}): {doc}")
-        sources.add(f"**[{src}]**: {url}")
+        context_snippets = []
+        for i in range(len(results['documents'][0])):
+            doc = results['documents'][0][i]
+            source = results['metadatas'][0][i].get('source', 'Unknown')
+            context_snippets.append(f"Source {i+1} ({source}): {doc}")
+            
+        context_text = "\n\n".join(context_snippets)
         
-    context_text = "\n\n".join(context_snippets)
-    
-    # GENERATION (G)
-    system_instruction = (
-        "You are an expert mental health summarization assistant. "
-        "Answer based ONLY on the provided snippets. If unsure, say so."
-    )
-    
-    rag_prompt = f"CONTEXT:\n{context_text}\n\nUSER QUESTION:\n{user_query}"
-    
-    response = gemini_client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=rag_prompt,
-        config=dict(system_instruction=system_instruction)
-    )
-    
-    source_list = "\n".join(sorted(list(sources)))
-    return f"{response.text}\n\n---\n**Sources Used:**\n{source_list}"
+        # 2. GENERATION
+        system_instruction = "You are a mental health assistant. Use ONLY the context provided."
+        rag_prompt = f"CONTEXT:\n{context_text}\n\nUSER QUESTION:\n{user_query}"
+        
+        response = gemini_client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=rag_prompt,
+            config=dict(system_instruction=system_instruction)
+        )
+        
+        return f"{response.text}\n\n---\n*Grounded in your custom knowledge base.*"
 
+    except Exception as e:
+        # Check if the error is a Rate Limit (429)
+        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+            return ("🌿 **Serene Ease is taking a deep breath.**\n\n"
+                    "We've hit the temporary limit for the free AI service. "
+                    "Please wait about 30-60 seconds and try your question again.")
+        else:
+            return f"❌ **An unexpected error occurred:** {e}"
 # --- 4. Streamlit UI ---
 
 def main():
