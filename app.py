@@ -10,32 +10,55 @@ MODEL_NAME = 'all-MiniLM-L6-v2'
 CHROMA_PATH = 'chroma_db_serene_ease'
 COLLECTION_NAME = f"mental_health_chunks_{MODEL_NAME.split('-')[0]}"
 N_RESULTS = 3 
-GEMINI_MODEL = "gemini-2.0-flash" # Note: Changed to 2.0-flash as 2.5 is not released yet
+GEMINI_MODEL = "gemini-2.0-flash" 
 
 # --- Function to initialize the RAG backend ---
 
 @st.cache_resource
 def get_rag_components():
-    """Initializes ChromaDB client and Gemini client once."""
+    """Initializes ChromaDB client and Gemini client once with detailed debugging."""
     
-    # 1. Look for API Key in Streamlit Secrets (Cloud) or Environment (Local)
+    # 1. Look for API Key
     api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
     
     if not api_key:
         st.error("FATAL ERROR: GEMINI_API_KEY not found. Please set it in Streamlit Cloud Secrets.")
         return None, None
     
+    # --- DEBUG SECTION ---
+    st.info("System Debug Mode")
+    st.write(f"Current Working Directory: `{os.getcwd()}`")
+    
+    # Check if the folder exists at all
+    if os.path.exists(CHROMA_PATH):
+        st.success(f"Folder `{CHROMA_PATH}` exists.")
+        st.write(f"Folder contents: {os.listdir(CHROMA_PATH)}")
+    else:
+        st.error(f"Folder `{CHROMA_PATH}` NOT found!")
+        st.write(f"Top-level files in GitHub repo: {os.listdir('.')}")
+    # ----------------------
+    
     try:
         # Initialize ChromaDB
         chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
+        
+        # 2. Check available collections
+        existing_collections = [c.name for c in chroma_client.list_collections()]
+        st.write(f"Available Collections: {existing_collections}")
+        
+        if COLLECTION_NAME not in existing_collections:
+            st.warning(f"Collection '{COLLECTION_NAME}' missing. Expected one of: {existing_collections}")
+            return None, None
+            
         collection = chroma_client.get_collection(name=COLLECTION_NAME)
         
-        # 2. Initialize Gemini Client with the explicit key
+        # 3. Initialize Gemini Client
         gemini_client = genai.Client(api_key=api_key)
         
         return collection, gemini_client
+        
     except Exception as e:
-        st.error(f"Error initializing RAG components: {e}")
+        st.error(f"Error during RAG initialization: {e}")
         return None, None
 
 
@@ -51,14 +74,14 @@ def run_rag_query(user_query, collection, gemini_client):
         include=['documents', 'metadatas']
     )
     
-    # Compile retrieved snippets and their sources
     context_snippets = []
     sources = set()
 
-    for i in range(N_RESULTS):
+    for i in range(len(results['documents'][0])):
         document = results['documents'][0][i]
-        source = results['metadatas'][0][i]['source']
-        url = results['metadatas'][0][i]['url']
+        meta = results['metadatas'][0][i]
+        source = meta.get('source', 'Unknown')
+        url = meta.get('url', '#')
         
         context_snippets.append(f"Source {i+1} ({source}): {document}")
         sources.add(f"**[{source}]**: {url}")
@@ -94,7 +117,6 @@ def run_rag_query(user_query, collection, gemini_client):
         )
     )
     
-    # Format the answer to include sources nicely
     source_list = "\n".join(sorted(list(sources)))
     full_response = (
         f"{response.text}\n\n"
@@ -109,51 +131,34 @@ def run_rag_query(user_query, collection, gemini_client):
 def main():
     st.set_page_config(page_title="Serene Ease RAG Chatbot", layout="wide")
     st.title("Serene Ease: Mental Health RAG Chatbot")
-    st.markdown("Ask a question about mental health, and the system will retrieve relevant context from your custom knowledge base and use Gemini to generate a grounded answer.")
+    st.markdown("Retrieving context from your custom knowledge base to generate grounded answers.")
     
-    # Initialize RAG components
     collection, gemini_client = get_rag_components()
     
     if collection is None or gemini_client is None:
-        return # Stop if initialization failed
+        st.warning("Awaiting proper database initialization...")
+        return 
 
-    # --- BLOCK ADDED TO MAINTAIN CHAT HISTORY ---
-    
-    # Initialize chat history in session state
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # Display chat messages from history on app rerun
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # Accept user input
     if user_query := st.chat_input("Ask a question about mental health..."):
-        
-        # Add user message to chat history and display it
         st.session_state.messages.append({"role": "user", "content": user_query})
         with st.chat_message("user"):
             st.markdown(user_query)
 
-        # Get and display the RAG response
         with st.chat_message("assistant"):
-            with st.spinner("Retrieving context and generating answer..."):
+            with st.spinner("Searching knowledge base..."):
                 try:
-                    # Run the RAG pipeline
                     full_response = run_rag_query(user_query, collection, gemini_client)
-                    
                     st.markdown(full_response)
-                    
-                    # Add assistant response to chat history
                     st.session_state.messages.append({"role": "assistant", "content": full_response})
-
                 except Exception as e:
-                    error_message = f"An error occurred: {e}. Please check your API key and data paths."
-                    st.error(error_message)
-                    st.session_state.messages.append({"role": "assistant", "content": error_message})
-    
-    # --- END OF CHAT HISTORY BLOCK ---
+                    st.error(f"Generation Error: {e}")
 
 if __name__ == "__main__":
     main()
