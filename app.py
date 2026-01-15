@@ -9,8 +9,8 @@ import os
 MODEL_NAME = 'all-MiniLM-L6-v2' 
 CHROMA_PATH = 'chroma_db_serene_ease'
 COLLECTION_NAME = f"mental_health_chunks_{MODEL_NAME.split('-')[0]}"
-N_RESULTS = 3 # Number of relevant chunks to retrieve
-GEMINI_MODEL = "gemini-2.5-flash" 
+N_RESULTS = 3 
+GEMINI_MODEL = "gemini-2.0-flash" # Note: Changed to 2.0-flash as 2.5 is not released yet
 
 # --- Function to initialize the RAG backend ---
 
@@ -18,9 +18,11 @@ GEMINI_MODEL = "gemini-2.5-flash"
 def get_rag_components():
     """Initializes ChromaDB client and Gemini client once."""
     
-    # Check for API Key
-    if not os.getenv("GEMINI_API_KEY"):
-        st.error("FATAL ERROR: GEMINI_API_KEY environment variable not set. Please set it to run the app.")
+    # 1. Look for API Key in Streamlit Secrets (Cloud) or Environment (Local)
+    api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+    
+    if not api_key:
+        st.error("FATAL ERROR: GEMINI_API_KEY not found. Please set it in Streamlit Cloud Secrets.")
         return None, None
     
     try:
@@ -28,13 +30,14 @@ def get_rag_components():
         chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
         collection = chroma_client.get_collection(name=COLLECTION_NAME)
         
-        # Initialize Gemini Client
-        gemini_client = genai.Client()
+        # 2. Initialize Gemini Client with the explicit key
+        gemini_client = genai.Client(api_key=api_key)
         
         return collection, gemini_client
     except Exception as e:
-        st.error(f"Error initializing RAG components (ChromaDB or Gemini): {e}")
+        st.error(f"Error initializing RAG components: {e}")
         return None, None
+
 
 # --- Main RAG Query Logic ---
 
