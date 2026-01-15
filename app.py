@@ -25,10 +25,10 @@ def get_rag_components():
     
     api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
     if not api_key:
-        st.error("GEMINI_API_KEY missing.")
+        st.error("FATAL ERROR: GEMINI_API_KEY missing in Streamlit Secrets.")
         return None, None
     
-    # 1. Setup Absolute Path
+    # 1. Setup Absolute Path (Ensures the cloud finds the folder)
     ABS_PATH = os.path.dirname(os.path.abspath(__file__))
     CHROMA_PATH = os.path.join(ABS_PATH, 'chroma_db_serene_ease')
     
@@ -40,16 +40,21 @@ def get_rag_components():
         all_collections = chroma_client.list_collections()
         existing_names = [c.name for c in all_collections]
         
+        # Display this to you in the app so you can see the truth
+        if not existing_names:
+            st.error(f"📂 Database connected, but it is EMPTY. No collections found in `{CHROMA_PATH}`.")
+            st.write("Check if your `chroma.sqlite3` file was actually pushed to GitHub.")
+            return None, None
+            
         st.info(f"📂 Database connected. Found collections: `{existing_names}`")
 
         # 4. Attempt to grab the collection
-        # Change this string to match whatever appears in 'existing_names' above
+        # This MUST match one of the names in 'existing_names'
         TARGET_NAME = "mental_health_chunks_all" 
         
         if TARGET_NAME not in existing_names:
-            st.error(f"Target '{TARGET_NAME}' not found in {existing_names}. "
-                     "Please update COLLECTION_NAME in your code to match.")
-            return None, None
+            st.warning(f"⚠️ Looking for '{TARGET_NAME}', but found {existing_collections}. Using '{existing_names[0]}' instead.")
+            TARGET_NAME = existing_names[0] # Auto-select the first one found
 
         collection = chroma_client.get_collection(name=TARGET_NAME)
         gemini_client = genai.Client(api_key=api_key)
