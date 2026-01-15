@@ -11,7 +11,7 @@ CHROMA_PATH = os.path.join(ABS_PATH, 'chroma_db_serene_ease')
 
 # This must match your backend files exactly
 COLLECTION_NAME = f"mental_health_chunks_{MODEL_NAME.split('-')[0]}"
-N_RESULTS = 3 
+N_RESULTS = 2 
 GEMINI_MODEL = "gemini-2.0-flash" # Use 2.0-flash for stability
 
 # --- 2. Backend Initialization ---
