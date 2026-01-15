@@ -21,48 +21,44 @@ GEMINI_MODEL = "gemini-2.0-flash"
 
 @st.cache_resource
 def get_rag_components():
-    """Initializes ChromaDB client and Gemini client once with detailed debugging."""
+    """Initializes ChromaDB and Gemini with a Collection Inspector."""
     
-    # 1. Look for API Key
     api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
-    
     if not api_key:
-        st.error("FATAL ERROR: GEMINI_API_KEY not found. Please set it in Streamlit Cloud Secrets.")
+        st.error("GEMINI_API_KEY missing.")
         return None, None
     
-    # --- DEBUG SECTION (Kept so we can see the fix in action) ---
-    st.info("System Debug Mode")
-    if os.path.exists(CHROMA_PATH):
-        st.success(f"Folder found at: `{CHROMA_PATH}`")
-        st.write(f"Files inside: {os.listdir(CHROMA_PATH)}")
-    else:
-        st.error(f"Folder NOT found at `{CHROMA_PATH}`")
-        st.write(f"Everything in root: {os.listdir(ABS_PATH)}")
-    # ----------------------
+    # 1. Setup Absolute Path
+    ABS_PATH = os.path.dirname(os.path.abspath(__file__))
+    CHROMA_PATH = os.path.join(ABS_PATH, 'chroma_db_serene_ease')
     
     try:
-        # Initialize ChromaDB with the absolute path
+        # 2. Connect to Chroma
         chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
         
-        # 2. Check available collections
-        existing_collections = [c.name for c in chroma_client.list_collections()]
-        st.write(f"Available Collections in Database: {existing_collections}")
+        # 3. INSPECTOR: List what is actually inside the DB
+        all_collections = chroma_client.list_collections()
+        existing_names = [c.name for c in all_collections]
         
-        if COLLECTION_NAME not in existing_collections:
-            st.warning(f"Looking for '{COLLECTION_NAME}', but only found: {existing_collections}")
+        st.info(f"📂 Database connected. Found collections: `{existing_names}`")
+
+        # 4. Attempt to grab the collection
+        # Change this string to match whatever appears in 'existing_names' above
+        TARGET_NAME = "mental_health_chunks_all" 
+        
+        if TARGET_NAME not in existing_names:
+            st.error(f"Target '{TARGET_NAME}' not found in {existing_names}. "
+                     "Please update COLLECTION_NAME in your code to match.")
             return None, None
-            
-        collection = chroma_client.get_collection(name=COLLECTION_NAME)
-        
-        # 3. Initialize Gemini Client
+
+        collection = chroma_client.get_collection(name=TARGET_NAME)
         gemini_client = genai.Client(api_key=api_key)
         
         return collection, gemini_client
         
     except Exception as e:
-        st.error(f"Error during RAG initialization: {e}")
+        st.error(f"Initialization Error: {e}")
         return None, None
-
 
 # --- Main RAG Query Logic ---
 
