@@ -6,9 +6,14 @@ from google import genai
 import os
 
 # --- Configuration  ---
-MODEL_NAME = 'all-MiniLM-L6-v2' 
-CHROMA_PATH = 'chroma_db_serene_ease'
-COLLECTION_NAME = f"mental_health_chunks_{MODEL_NAME.split('-')[0]}"
+# 1. Use absolute pathing to ensure the Cloud finds the folder regardless of where it starts
+ABS_PATH = os.path.dirname(os.path.abspath(__file__))
+CHROMA_PATH = os.path.join(ABS_PATH, 'chroma_db_serene_ease')
+
+# 2. Hardcode the collection name to exactly what you created locally 
+# (Based on your error, it was 'mental_health_chunks_all')
+COLLECTION_NAME = "mental_health_chunks_all" 
+
 N_RESULTS = 3 
 GEMINI_MODEL = "gemini-2.0-flash" 
 
@@ -25,29 +30,26 @@ def get_rag_components():
         st.error("FATAL ERROR: GEMINI_API_KEY not found. Please set it in Streamlit Cloud Secrets.")
         return None, None
     
-    # --- DEBUG SECTION ---
+    # --- DEBUG SECTION (Kept so we can see the fix in action) ---
     st.info("System Debug Mode")
-    st.write(f"Current Working Directory: `{os.getcwd()}`")
-    
-    # Check if the folder exists at all
     if os.path.exists(CHROMA_PATH):
-        st.success(f"Folder `{CHROMA_PATH}` exists.")
-        st.write(f"Folder contents: {os.listdir(CHROMA_PATH)}")
+        st.success(f"Folder found at: `{CHROMA_PATH}`")
+        st.write(f"Files inside: {os.listdir(CHROMA_PATH)}")
     else:
-        st.error(f"Folder `{CHROMA_PATH}` NOT found!")
-        st.write(f"Top-level files in GitHub repo: {os.listdir('.')}")
+        st.error(f"Folder NOT found at `{CHROMA_PATH}`")
+        st.write(f"Everything in root: {os.listdir(ABS_PATH)}")
     # ----------------------
     
     try:
-        # Initialize ChromaDB
+        # Initialize ChromaDB with the absolute path
         chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
         
         # 2. Check available collections
         existing_collections = [c.name for c in chroma_client.list_collections()]
-        st.write(f"Available Collections: {existing_collections}")
+        st.write(f"Available Collections in Database: {existing_collections}")
         
         if COLLECTION_NAME not in existing_collections:
-            st.warning(f"Collection '{COLLECTION_NAME}' missing. Expected one of: {existing_collections}")
+            st.warning(f"Looking for '{COLLECTION_NAME}', but only found: {existing_collections}")
             return None, None
             
         collection = chroma_client.get_collection(name=COLLECTION_NAME)
@@ -66,8 +68,6 @@ def get_rag_components():
 
 def run_rag_query(user_query, collection, gemini_client):
     """Performs the full RAG process and returns the generated text and sources."""
-    
-    # 1. RETRIEVAL (R)
     results = collection.query(
         query_texts=[user_query],
         n_results=N_RESULTS,
@@ -88,7 +88,6 @@ def run_rag_query(user_query, collection, gemini_client):
         
     context_text = "\n\n".join(context_snippets)
     
-    # 2. PROMPT CONSTRUCTION
     system_instruction = (
         "You are an expert mental health summarization assistant. "
         "Your task is to synthesize a coherent and specific answer to the user's question "
@@ -96,47 +95,27 @@ def run_rag_query(user_query, collection, gemini_client):
         "If the snippets do not contain the information, state that clearly."
     )
     
-    rag_prompt = f"""
-    CONTEXT SNIPPETS:
-    ---
-    {context_text}
-    ---
+    rag_prompt = f"CONTEXT SNIPPETS:\n{context_text}\n\nUSER QUESTION:\n{user_query}"
     
-    USER QUESTION:
-    {user_query}
-    
-    Synthesize an answer using only the provided CONTEXT SNIPPETS.
-    """
-    
-    # 3. GENERATION (G)
     response = gemini_client.models.generate_content(
         model=GEMINI_MODEL,
         contents=rag_prompt,
-        config=dict(
-            system_instruction=system_instruction
-        )
+        config=dict(system_instruction=system_instruction)
     )
     
     source_list = "\n".join(sorted(list(sources)))
-    full_response = (
-        f"{response.text}\n\n"
-        f"--- \n"
-        f"**Sources Used:**\n{source_list}"
-    )
-    
-    return full_response
+    return f"{response.text}\n\n---\n**Sources Used:**\n{source_list}"
 
 # --- Streamlit UI Components ---
 
 def main():
     st.set_page_config(page_title="Serene Ease RAG Chatbot", layout="wide")
     st.title("Serene Ease: Mental Health RAG Chatbot")
-    st.markdown("Retrieving context from your custom knowledge base to generate grounded answers.")
     
     collection, gemini_client = get_rag_components()
     
     if collection is None or gemini_client is None:
-        st.warning("Awaiting proper database initialization...")
+        st.warning("Awaiting database connection...")
         return 
 
     if "messages" not in st.session_state:
